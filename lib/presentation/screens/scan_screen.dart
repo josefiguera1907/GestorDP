@@ -1,0 +1,646 @@
+import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:provider/provider.dart';
+import '../../domain/entities/package.dart';
+import '../providers/package_provider.dart';
+import '../providers/location_provider.dart';
+import 'home_screen.dart';
+
+class ScanScreen extends StatefulWidget {
+  const ScanScreen({super.key});
+
+  @override
+  State<ScanScreen> createState() => _ScanScreenState();
+}
+
+class _ScanScreenState extends State<ScanScreen> {
+  final MobileScannerController cameraController = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates, // Optimizado para TC26
+    facing: CameraFacing.back,
+    torchEnabled: false,
+    returnImage: false, // Mejor rendimiento
+  );
+
+  bool isScanning = true;
+
+  @override
+  void dispose() {
+    cameraController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Detectar si estamos en un dispositivo pequeño (TC26)
+    final isSmallScreen = MediaQuery.of(context).size.shortestSide < 600;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Escanear Código QR',
+          style: TextStyle(fontSize: isSmallScreen ? 16 : 20),
+        ),
+        actions: [
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController,
+              builder: (context, state, child) {
+                switch (state.torchState) {
+                  case TorchState.off:
+                    return const Icon(Icons.flash_off, color: Colors.grey);
+                  case TorchState.on:
+                    return const Icon(Icons.flash_on, color: Colors.yellow);
+                  default:
+                    return const Icon(Icons.flash_off, color: Colors.grey);
+                }
+              },
+            ),
+            onPressed: () => cameraController.toggleTorch(),
+          ),
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController,
+              builder: (context, state, child) {
+                switch (state.cameraDirection) {
+                  case CameraFacing.front:
+                    return const Icon(Icons.camera_front);
+                  case CameraFacing.back:
+                    return const Icon(Icons.camera_rear);
+                  default:
+                    return const Icon(Icons.camera_rear);
+                }
+              },
+            ),
+            onPressed: () => cameraController.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: cameraController,
+            onDetect: (capture) {
+              if (!isScanning) return;
+
+              final List<Barcode> barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                debugPrint('Barcode found! ${barcode.rawValue}');
+                if (barcode.rawValue != null) {
+                  isScanning = false;
+                  _processScannedCode(barcode.rawValue!);
+                  break;
+                }
+              }
+            },
+          ),
+          CustomPaint(
+            painter: QrScannerOverlay(
+              borderColor: Theme.of(context).colorScheme.primary,
+              borderWidth: 3.0,
+              overlayColor: Colors.black54,
+              borderRadius: 10,
+              borderLength: 30,
+            ),
+          ),
+          Positioned(
+            bottom: MediaQuery.of(context).size.height * 0.1,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Coloque el código QR dentro del marco',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _processScannedCode(String code) async {
+    cameraController.stop();
+
+    // LOG: Imprimir todo el contenido del QR
+    print('═══════════════════════════════════════════════════════');
+    print('QR ESCANEADO - CONTENIDO COMPLETO:');
+    print('═══════════════════════════════════════════════════════');
+    print(code);
+    print('═══════════════════════════════════════════════════════');
+    print('Longitud: ${code.length} caracteres');
+    print('═══════════════════════════════════════════════════════');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    // Parse QR data
+    final packageData = _parseQRCode(code);
+
+    // Check if package already exists
+    final packageProvider = context.read<PackageProvider>();
+    final existingPackage = await packageProvider.getPackageByTrackingNumber(packageData['trackingNumber']!);
+
+    if (mounted) {
+      Navigator.of(context).pop(); // Close loading dialog
+
+      if (existingPackage != null) {
+        // Paquete ya existe, ir directo a traslado
+        _navigateToTransfer(packageData['trackingNumber']!);
+      } else {
+        // Registrar automáticamente sin formulario
+        _registerPackageAutomatically(packageData);
+      }
+    }
+  }
+
+  Map<String, String> _parseQRCode(String code) {
+    final parts = code.split(';');
+
+    // LOG: Imprimir TODAS las partes del QR para debug
+    print('═══════════════════════════════════════════════════════');
+    print('PARTES DEL QR (Total: ${parts.length}):');
+    for (int i = 0; i < parts.length; i++) {
+      if (parts[i].isNotEmpty) {
+        print('[$i] = "${parts[i]}"');
+      }
+    }
+    print('═══════════════════════════════════════════════════════');
+
+    // Extraer datos del QR según el formato especificado
+    return {
+      'trackingNumber': parts.length > 0 ? parts[0] : '',
+      'registeredDate': parts.length > 2 ? parts[2] : '',
+      'senderName': parts.length > 3 ? parts[3] : '',
+      'senderPhone': parts.length > 4 ? parts[4] : '',
+      'senderEmail': parts.length > 5 ? parts[5] : '',
+      'senderIdType': parts.length > 6 ? parts[6] : '',
+      'senderIdNumber': parts.length > 7 ? parts[7] : '',
+      'recipientName': parts.length > 8 ? parts[8] : '',
+      'recipientPhone': parts.length > 9 ? parts[9] : '',
+      'recipientIdType': parts.length > 11 ? parts[11] : '',
+      'recipientIdNumber': parts.length > 12 ? parts[12] : '',
+      'weight': parts.length > 22 ? parts[22] : '',
+      'location': parts.length > 10 ? parts[10] : '',
+      'courier': parts.length > 30 ? parts[30] : '',
+    };
+  }
+
+  void _registerPackageAutomatically(Map<String, String> data) async {
+    try {
+      // Parsear fecha si existe, sino usar fecha actual
+      DateTime registeredDate = DateTime.now();
+      if (data['registeredDate']!.isNotEmpty) {
+        try {
+          registeredDate = DateTime.parse(data['registeredDate']!.replaceAll(' ', 'T'));
+        } catch (e) {
+          print('Error parseando fecha, usando fecha actual');
+        }
+      }
+
+      // Parsear peso
+      double? weight;
+      print('═══════════════════════════════════════════════════════');
+      print('DATOS PARSEADOS:');
+      print('Peso raw: "${data['weight']}"');
+      print('═══════════════════════════════════════════════════════');
+
+      if (data['weight']!.isNotEmpty) {
+        try {
+          // Limpiar el string del peso (remover espacios)
+          final weightStr = data['weight']!.trim();
+          if (weightStr.isNotEmpty) {
+            weight = double.parse(weightStr);
+            print('Peso parseado correctamente: $weight kg');
+          }
+        } catch (e) {
+          print('Error parseando peso: $e');
+          print('Valor del peso que falló: "${data['weight']}"');
+        }
+      }
+
+      final package = Package(
+        trackingNumber: data['trackingNumber']!,
+        senderName: data['senderName']!.isNotEmpty ? data['senderName']! : 'No especificado',
+        senderPhone: data['senderPhone']!.isNotEmpty ? data['senderPhone']! : '0000000000',
+        senderEmail: data['senderEmail'],
+        senderIdType: data['senderIdType'],
+        senderIdNumber: data['senderIdNumber'],
+        recipientName: data['recipientName']!.isNotEmpty ? data['recipientName']! : 'No especificado',
+        recipientPhone: data['recipientPhone']!.isNotEmpty ? data['recipientPhone']! : '0000000000',
+        recipientIdType: data['recipientIdType'],
+        recipientIdNumber: data['recipientIdNumber'],
+        weight: weight,
+        status: 'Pendiente',
+        locationId: null,
+        warehouseId: null,
+        registeredDate: registeredDate,
+        notified: false,
+        notes: 'Courier: ${data['courier']} | Ubicación: ${data['location']}',
+      );
+
+      // Guardar el paquete en BD
+      try {
+        await context.read<PackageProvider>().addPackage(package);
+      } catch (e) {
+        // Si es un error de duplicate key, es porque el paquete ya existe
+        if (e.toString().contains('UNIQUE constraint failed') ||
+            e.toString().contains('duplicate')) {
+          print('⚠️ Paquete duplicado detectado: ${data['trackingNumber']}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('⚠️ Este paquete ya existe en el sistema'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 3),
+              ),
+            );
+            // Ir directamente al traslado sin crear duplicado
+            _navigateToTransfer(data['trackingNumber']!);
+            return;
+          }
+        } else {
+          // Otro error
+          throw e;
+        }
+      }
+
+      if (mounted) {
+        // Ir a traslado (simplemente retorna el tracking number)
+        _navigateToTransfer(data['trackingNumber']!);
+      }
+    } catch (e) {
+      print('Error registrando paquete: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al registrar paquete: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        // Volver a activar el scanner
+        setState(() {
+          isScanning = true;
+        });
+        cameraController.start();
+      }
+    }
+  }
+
+  void _navigateToTransfer(String trackingNumber) {
+    if (!mounted) return;
+
+    // Cerrar scanner y volver a HomeScreen
+    Navigator.of(context).pop(trackingNumber);
+  }
+
+  void _showPackageExistsDialog(Package package) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paquete Encontrado'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Guía: ${package.trackingNumber}'),
+            Text('Destinatario: ${package.recipientName}'),
+            Text('Estado: ${package.status}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context, true);
+            },
+            child: const Text('Cerrar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context, true);
+              // TODO: Navigate to package details
+            },
+            child: const Text('Ver Detalles'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNewPackageDialog(String trackingNumber) async {
+    final locationProvider = context.read<LocationProvider>();
+    final locations = await locationProvider.loadLocations().then((_) =>
+        locationProvider.availableLocations);
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      builder: (context) => NewPackageSheet(
+        trackingNumber: trackingNumber,
+        availableLocations: locations,
+        onSave: (package) async {
+          await context.read<PackageProvider>().addPackage(package);
+          if (mounted) {
+            Navigator.pop(context); // Close sheet
+            Navigator.pop(context, true); // Close scanner
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Paquete registrado correctamente'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        },
+        onCancel: () {
+          Navigator.pop(context);
+          setState(() {
+            isScanning = true;
+          });
+          cameraController.start();
+        },
+      ),
+    );
+  }
+}
+
+class NewPackageSheet extends StatefulWidget {
+  final String trackingNumber;
+  final List availableLocations;
+  final Function(Package) onSave;
+  final VoidCallback onCancel;
+
+  const NewPackageSheet({
+    super.key,
+    required this.trackingNumber,
+    required this.availableLocations,
+    required this.onSave,
+    required this.onCancel,
+  });
+
+  @override
+  State<NewPackageSheet> createState() => _NewPackageSheetState();
+}
+
+class _NewPackageSheetState extends State<NewPackageSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _customerNameController = TextEditingController();
+  final _customerPhoneController = TextEditingController();
+  final _notesController = TextEditingController();
+  String? selectedLocationId;
+
+  @override
+  void dispose() {
+    _customerNameController.dispose();
+    _customerPhoneController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Registrar Nuevo Paquete',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                initialValue: widget.trackingNumber,
+                decoration: const InputDecoration(
+                  labelText: 'Número de Guía',
+                  prefixIcon: Icon(Icons.qr_code),
+                ),
+                enabled: false,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _customerNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del Cliente *',
+                  prefixIcon: Icon(Icons.person),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Ingrese el nombre del cliente';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _customerPhoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Teléfono *',
+                  prefixIcon: Icon(Icons.phone),
+                ),
+                keyboardType: TextInputType.phone,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Ingrese el teléfono';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: selectedLocationId,
+                decoration: const InputDecoration(
+                  labelText: 'Ubicación *',
+                  prefixIcon: Icon(Icons.location_on),
+                ),
+                items: widget.availableLocations.map((location) {
+                  return DropdownMenuItem<String>(
+                    value: location.id.toString(),
+                    child: Text(location.code),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    selectedLocationId = value;
+                  });
+                },
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Seleccione una ubicación';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notas (opcional)',
+                  prefixIcon: Icon(Icons.note),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: widget.onCancel,
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _savePackage,
+                      child: const Text('Guardar'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _savePackage() {
+    if (_formKey.currentState!.validate()) {
+      final package = Package(
+        trackingNumber: widget.trackingNumber,
+        senderName: 'Remitente por definir',
+        senderPhone: '000000000',
+        recipientName: _customerNameController.text,
+        recipientPhone: _customerPhoneController.text,
+        status: 'Pendiente',
+        locationId: selectedLocationId,
+        warehouseId: '1', // Default warehouse
+        registeredDate: DateTime.now(),
+        notified: false,
+        notes: _notesController.text.isEmpty ? null : _notesController.text,
+      );
+
+      widget.onSave(package);
+    }
+  }
+}
+
+// QR Scanner Overlay (same as before)
+class QrScannerOverlay extends CustomPainter {
+  final Color borderColor;
+  final double borderWidth;
+  final Color overlayColor;
+  final double borderRadius;
+  final double borderLength;
+
+  QrScannerOverlay({
+    this.borderColor = Colors.white,
+    this.borderWidth = 2.0,
+    this.overlayColor = const Color(0x60000000),
+    this.borderRadius = 10.0,
+    this.borderLength = 30.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.width;
+    final height = size.height;
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    final squareSize = width * 0.7;
+    final left = (width - squareSize) / 2;
+    final top = (height - squareSize) / 2;
+    final squareRect = Rect.fromLTWH(left, top, squareSize, squareSize);
+
+    final backgroundPath = Path()..addRect(Rect.fromLTWH(0, 0, width, height));
+
+    final squarePath = Path()
+      ..addRRect(
+          RRect.fromRectAndRadius(squareRect, Radius.circular(borderRadius)));
+
+    final overlayPath = Path.combine(
+      PathOperation.difference,
+      backgroundPath,
+      squarePath,
+    );
+
+    canvas.drawPath(overlayPath, Paint()..color = overlayColor);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(squareRect, Radius.circular(borderRadius)),
+      borderPaint,
+    );
+
+    // Draw corner borders
+    canvas.drawPath(
+      Path()
+        ..moveTo(left, top + borderLength)
+        ..lineTo(left, top)
+        ..lineTo(left + borderLength, top),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(width - left - borderLength, top)
+        ..lineTo(width - left, top)
+        ..lineTo(width - left, top + borderLength),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(left, height - top - borderLength)
+        ..lineTo(left, height - top)
+        ..lineTo(left + borderLength, height - top),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(width - left, height - top - borderLength)
+        ..lineTo(width - left, height - top)
+        ..lineTo(width - left - borderLength, height - top),
+      borderPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}

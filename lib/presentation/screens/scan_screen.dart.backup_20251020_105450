@@ -1,0 +1,911 @@
+import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:provider/provider.dart';
+import 'dart:async';
+import '../../domain/entities/package.dart';
+import '../providers/package_provider.dart';
+import '../providers/location_provider.dart';
+import '../../core/services/datawedge_service.dart';
+import 'home_screen.dart';
+
+class ScanScreen extends StatefulWidget {
+  const ScanScreen({super.key});
+
+  @override
+  State<ScanScreen> createState() => _ScanScreenState();
+}
+
+class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
+  late MobileScannerController cameraController;
+
+  bool _isProcessing = false;
+  String? lastScannedCode;
+  bool _cameraInitialized = false;
+  DateTime? _lastScanTime;
+  int _detectionCount = 0;
+
+  // DataWedge support para TC26
+  final DataWedgeService _dataWedgeService = DataWedgeService();
+  StreamSubscription<String>? _dataWedgeSubscription;
+  bool _dataWedgeAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    print('🚀 ScanScreen iniciando...');
+
+    // Inicializar controller con configuración optimizada para Android
+    cameraController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal,
+      facing: CameraFacing.back,
+      torchEnabled: false,
+      returnImage: false,
+      // Sin formatos específicos = detecta todos
+    );
+
+    // Inicializar DataWedge en background sin bloquear la cámara
+    _initializeDataWedge();
+
+    // Iniciar cámara con delay para asegurar que el widget esté montado
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeCamera();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Reiniciar cámara cuando la app vuelve a primer plano
+    if (state == AppLifecycleState.resumed) {
+      if (!_cameraInitialized && !_dataWedgeAvailable) {
+        _initializeCamera();
+      }
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      print('📷 Iniciando cámara...');
+      await cameraController.start();
+      if (mounted) {
+        setState(() {
+          _cameraInitialized = true;
+        });
+        print('✅ Cámara iniciada correctamente');
+        print('✅ Controller config: detectionSpeed=${cameraController.detectionSpeed}, facing=${cameraController.facing}');
+      }
+    } catch (e) {
+      print('❌ Error al iniciar cámara: $e');
+      if (mounted) {
+        setState(() {
+          _cameraInitialized = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al iniciar cámara: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Reintentar',
+              onPressed: _initializeCamera,
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _initializeDataWedge() async {
+    try {
+      // Verificar si DataWedge está disponible SIN afectar la cámara
+      final isAvailable = await _dataWedgeService.isDataWedgeAvailable();
+
+      if (isAvailable) {
+        print('✅ DataWedge detectado, inicializando...');
+        await _dataWedgeService.initialize();
+
+        _dataWedgeSubscription = _dataWedgeService.scanStream.listen((scannedData) {
+          if (_isProcessing) {
+            print('⚠️ Ya procesando, ignorando: $scannedData');
+            return;
+          }
+          print('📦 DataWedge escaneó: $scannedData');
+          _isProcessing = true;
+          _processScannedCode(scannedData);
+        });
+
+        // Solo marcar como disponible y detener cámara si todo salió bien
+        if (mounted) {
+          setState(() {
+            _dataWedgeAvailable = true;
+          });
+          cameraController.stop();
+          print('✅ DataWedge listo - cámara detenida');
+        }
+      } else {
+        print('⚠️ DataWedge NO disponible - usando cámara');
+      }
+    } catch (e) {
+      print('❌ Error con DataWedge: $e - usando cámara');
+      // No hacer nada, dejar que la cámara funcione normalmente
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _dataWedgeSubscription?.cancel();
+    _dataWedgeService.dispose();
+    cameraController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Detectar si estamos en un dispositivo pequeño (TC26)
+    final isSmallScreen = MediaQuery.of(context).size.shortestSide < 600;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Escanear Código QR',
+          style: TextStyle(fontSize: isSmallScreen ? 16 : 20),
+        ),
+        actions: [
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController,
+              builder: (context, state, child) {
+                switch (state.torchState) {
+                  case TorchState.off:
+                    return const Icon(Icons.flash_off, color: Colors.grey);
+                  case TorchState.on:
+                    return const Icon(Icons.flash_on, color: Colors.yellow);
+                  default:
+                    return const Icon(Icons.flash_off, color: Colors.grey);
+                }
+              },
+            ),
+            onPressed: () => cameraController.toggleTorch(),
+          ),
+          IconButton(
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController,
+              builder: (context, state, child) {
+                switch (state.cameraDirection) {
+                  case CameraFacing.front:
+                    return const Icon(Icons.camera_front);
+                  case CameraFacing.back:
+                    return const Icon(Icons.camera_rear);
+                  default:
+                    return const Icon(Icons.camera_rear);
+                }
+              },
+            ),
+            onPressed: () => cameraController.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: cameraController,
+            onDetect: (capture) {
+              _detectionCount++;
+
+              // Log cada 10 detecciones para debug
+              if (_detectionCount % 10 == 0) {
+                print('📊 Detecciones totales: $_detectionCount');
+              }
+
+              // Si DataWedge está disponible, ignorar escaneos de cámara
+              if (_dataWedgeAvailable) {
+                return;
+              }
+
+              if (_isProcessing) {
+                return;
+              }
+
+              final List<Barcode> barcodes = capture.barcodes;
+
+              // LOG CRÍTICO: Siempre imprimir cuando detecta algo
+              if (barcodes.isNotEmpty) {
+                print('🔍 ¡DETECCIÓN! Barcodes: ${barcodes.length}');
+              }
+
+              if (barcodes.isEmpty) {
+                return;
+              }
+
+              // Procesar INMEDIATAMENTE el primer código
+              final barcode = barcodes.first;
+              final rawValue = barcode.rawValue;
+
+              print('📱 Barcode #1:');
+              print('   Format: ${barcode.format}');
+              print('   Type: ${barcode.type}');
+              print('   RawValue: ${rawValue ?? "NULL"}');
+              print('   RawValue length: ${rawValue?.length ?? 0}');
+
+              if (rawValue == null || rawValue.isEmpty) {
+                print('⚠️ RawValue es NULL o vacío');
+                return;
+              }
+
+              // Debouncing: evitar el mismo código en menos de 2 segundos
+              final now = DateTime.now();
+              if (lastScannedCode == rawValue) {
+                if (_lastScanTime != null && now.difference(_lastScanTime!).inSeconds < 2) {
+                  print('⚠️ Código duplicado reciente, ignorando');
+                  return;
+                }
+              }
+
+              print('✅ ¡CÓDIGO VÁLIDO! Procesando: ${rawValue.substring(0, rawValue.length > 20 ? 20 : rawValue.length)}...');
+              _lastScanTime = now;
+              lastScannedCode = rawValue;
+
+              setState(() {
+                _isProcessing = true;
+              });
+
+              _processScannedCode(rawValue);
+            },
+          ),
+          CustomPaint(
+            painter: QrScannerOverlay(
+              borderColor: Theme.of(context).colorScheme.primary,
+              borderWidth: 3.0,
+              overlayColor: Colors.black54,
+              borderRadius: 10,
+              borderLength: 30,
+            ),
+          ),
+          // Indicador de estado de la cámara
+          if (!_cameraInitialized && !_dataWedgeAvailable)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black,
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 16),
+                      Text(
+                        'Iniciando cámara...',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // Mensaje de instrucción
+          Positioned(
+            bottom: MediaQuery.of(context).size.height * 0.1,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _dataWedgeAvailable
+                        ? 'Use el botón lateral para escanear'
+                        : 'Coloque el código QR dentro del marco',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (_cameraInitialized && !_dataWedgeAvailable) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _isProcessing ? '🔄 Procesando...' : '📷 Cámara lista',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _isProcessing ? Colors.orange : Colors.green,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          // Botón de prueba para diagnosticar
+          Positioned(
+            top: 20,
+            right: 20,
+            child: FloatingActionButton(
+              mini: true,
+              backgroundColor: Colors.blue,
+              onPressed: () {
+                print('🧪 TEST: Estado actual del scanner');
+                print('   - Cámara inicializada: $_cameraInitialized');
+                print('   - DataWedge disponible: $_dataWedgeAvailable');
+                print('   - Procesando: $_isProcessing');
+                print('   - Detecciones totales: $_detectionCount');
+                print('   - Último código: $lastScannedCode');
+                print('   - Controller: ${cameraController.value}');
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Cámara: ${_cameraInitialized ? "✅" : "❌"} | '
+                      'Detecciones: $_detectionCount',
+                    ),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: const Icon(Icons.info_outline, size: 20),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _processScannedCode(String code) async {
+    try {
+      print('🔄 _processScannedCode iniciado con código de longitud: ${code.length}');
+
+      // Detener cámara si no es DataWedge
+      if (!_dataWedgeAvailable) {
+        print('⏸️  Deteniendo cámara...');
+        await cameraController.stop();
+      }
+
+      // Guardar el código QR original completo
+      lastScannedCode = code;
+
+      // LOG: Imprimir todo el contenido del QR
+      print('═══════════════════════════════════════════════════════');
+      print('QR ESCANEADO - CONTENIDO COMPLETO:');
+      print('═══════════════════════════════════════════════════════');
+      print(code);
+      print('═══════════════════════════════════════════════════════');
+      print('Longitud: ${code.length} caracteres');
+      print('═══════════════════════════════════════════════════════');
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      // Parse QR data
+      final packageData = _parseQRCode(code);
+
+      // Check if package already exists
+      final packageProvider = context.read<PackageProvider>();
+      final existingPackage = await packageProvider.getPackageByTrackingNumber(packageData['trackingNumber']!);
+
+      if (mounted) {
+        Navigator.of(context).pop(); // Close loading dialog
+
+        if (existingPackage != null) {
+          // Paquete ya existe, ir directo a traslado
+          print('✅ Paquete existente encontrado, navegando a traslado');
+          _navigateToTransfer(packageData['trackingNumber']!);
+        } else {
+          // Registrar automáticamente sin formulario
+          print('✅ Paquete nuevo, registrando automáticamente');
+          _registerPackageAutomatically(packageData, code);
+        }
+      }
+    } catch (e) {
+      print('❌ Error en _processScannedCode: $e');
+      if (mounted) {
+        // Cerrar loading dialog si está abierto
+        try {
+          Navigator.of(context).pop();
+        } catch (_) {}
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al procesar código: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+
+        // Resetear para permitir nuevo escaneo
+        setState(() {
+          _isProcessing = false;
+        });
+        if (!_dataWedgeAvailable) {
+          cameraController.start();
+        }
+      }
+    }
+  }
+
+  Map<String, String> _parseQRCode(String code) {
+    final parts = code.split(';');
+
+    // LOG: Imprimir TODAS las partes del QR para debug
+    print('═══════════════════════════════════════════════════════');
+    print('PARTES DEL QR (Total: ${parts.length}):');
+    for (int i = 0; i < parts.length; i++) {
+      if (parts[i].isNotEmpty) {
+        print('[$i] = "${parts[i]}"');
+      }
+    }
+    print('═══════════════════════════════════════════════════════');
+
+    // Extraer datos del QR según el formato especificado
+    return {
+      'trackingNumber': parts.length > 0 ? parts[0] : '',
+      'registeredDate': parts.length > 2 ? parts[2] : '',
+      'senderName': parts.length > 3 ? parts[3] : '',
+      'senderPhone': parts.length > 4 ? parts[4] : '',
+      'senderEmail': parts.length > 5 ? parts[5] : '',
+      'senderIdType': parts.length > 6 ? parts[6] : '',
+      'senderIdNumber': parts.length > 7 ? parts[7] : '',
+      'recipientName': parts.length > 8 ? parts[8] : '',
+      'recipientPhone': parts.length > 9 ? parts[9] : '',
+      'recipientIdType': parts.length > 11 ? parts[11] : '',
+      'recipientIdNumber': parts.length > 12 ? parts[12] : '',
+      'weight': parts.length > 22 ? parts[22] : '',
+      'location': parts.length > 10 ? parts[10] : '',
+      'courier': parts.length > 30 ? parts[30] : '',
+    };
+  }
+
+  Future<void> _registerPackageAutomatically(Map<String, String> data, String originalQRCode) async {
+    try {
+      // Parsear fecha si existe, sino usar fecha actual
+      DateTime registeredDate = DateTime.now();
+      if (data['registeredDate']!.isNotEmpty) {
+        try {
+          registeredDate = DateTime.parse(data['registeredDate']!.replaceAll(' ', 'T'));
+        } catch (e) {
+          print('Error parseando fecha, usando fecha actual');
+        }
+      }
+
+      // Parsear peso
+      double? weight;
+      print('═══════════════════════════════════════════════════════');
+      print('DATOS PARSEADOS:');
+      print('Peso raw: "${data['weight']}"');
+      print('═══════════════════════════════════════════════════════');
+
+      if (data['weight']!.isNotEmpty) {
+        try {
+          // Limpiar el string del peso (remover espacios)
+          final weightStr = data['weight']!.trim();
+          if (weightStr.isNotEmpty) {
+            weight = double.parse(weightStr);
+            print('Peso parseado correctamente: $weight kg');
+          }
+        } catch (e) {
+          print('Error parseando peso: $e');
+          print('Valor del peso que falló: "${data['weight']}"');
+        }
+      }
+
+      final package = Package(
+        trackingNumber: data['trackingNumber']!,
+        senderName: data['senderName']!.isNotEmpty ? data['senderName']! : 'No especificado',
+        senderPhone: data['senderPhone']!.isNotEmpty ? data['senderPhone']! : '0000000000',
+        senderEmail: data['senderEmail'],
+        senderIdType: data['senderIdType'],
+        senderIdNumber: data['senderIdNumber'],
+        recipientName: data['recipientName']!.isNotEmpty ? data['recipientName']! : 'No especificado',
+        recipientPhone: data['recipientPhone']!.isNotEmpty ? data['recipientPhone']! : '0000000000',
+        recipientIdType: data['recipientIdType'],
+        recipientIdNumber: data['recipientIdNumber'],
+        weight: weight,
+        status: 'Pendiente',
+        locationId: null,
+        warehouseId: null,
+        registeredDate: registeredDate,
+        notified: false,
+        notes: 'Courier: ${data['courier']} | Ubicación: ${data['location']}',
+        originalQRData: originalQRCode, // Guardar el QR original completo
+      );
+
+      // Guardar el paquete
+      print('💾 Guardando paquete en la base de datos...');
+      await context.read<PackageProvider>().addPackage(package);
+      print('✅ Paquete guardado exitosamente');
+
+      if (mounted) {
+        // Navegar a la pantalla de traslado
+        _navigateToTransfer(data['trackingNumber']!);
+      }
+    } catch (e) {
+      print('❌ Error registrando paquete: $e');
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al registrar paquete: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        // Volver a activar el scanner
+        setState(() {
+          _isProcessing = false;
+        });
+        if (!_dataWedgeAvailable) {
+          cameraController.start();
+        }
+      }
+    }
+  }
+
+  void _navigateToTransfer(String trackingNumber) {
+    // Cerrar el scanner y todas las pantallas hasta llegar a home
+    Navigator.of(context).popUntil((route) => route.isFirst);
+
+    // Navegar a HomeScreen con el tracking number preseleccionado
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => HomeScreen(preselectedTrackingNumber: trackingNumber),
+      ),
+    );
+
+    // Mostrar notificación
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Paquete $trackingNumber listo para traslado'),
+        backgroundColor: Colors.blue,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showPackageExistsDialog(Package package) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paquete Encontrado'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Guía: ${package.trackingNumber}'),
+            Text('Destinatario: ${package.recipientName}'),
+            Text('Estado: ${package.status}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context, true);
+            },
+            child: const Text('Cerrar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context, true);
+              // TODO: Navigate to package details
+            },
+            child: const Text('Ver Detalles'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNewPackageDialog(String trackingNumber) async {
+    final locationProvider = context.read<LocationProvider>();
+    final locations = await locationProvider.loadLocations().then((_) =>
+        locationProvider.availableLocations);
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      builder: (context) => NewPackageSheet(
+        trackingNumber: trackingNumber,
+        availableLocations: locations,
+        originalQRCode: lastScannedCode, // Pasar el QR original
+        onSave: (package) async {
+          await context.read<PackageProvider>().addPackage(package);
+          if (mounted) {
+            Navigator.pop(context); // Close sheet
+            Navigator.pop(context, true); // Close scanner
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Paquete registrado correctamente'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        },
+        onCancel: () {
+          Navigator.pop(context);
+          cameraController.start();
+        },
+      ),
+    );
+  }
+}
+
+class NewPackageSheet extends StatefulWidget {
+  final String trackingNumber;
+  final List availableLocations;
+  final String? originalQRCode; // QR original completo
+  final Function(Package) onSave;
+  final VoidCallback onCancel;
+
+  const NewPackageSheet({
+    super.key,
+    required this.trackingNumber,
+    required this.availableLocations,
+    this.originalQRCode,
+    required this.onSave,
+    required this.onCancel,
+  });
+
+  @override
+  State<NewPackageSheet> createState() => _NewPackageSheetState();
+}
+
+class _NewPackageSheetState extends State<NewPackageSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _customerNameController = TextEditingController();
+  final _customerPhoneController = TextEditingController();
+  final _notesController = TextEditingController();
+  String? selectedLocationId;
+
+  @override
+  void dispose() {
+    _customerNameController.dispose();
+    _customerPhoneController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Registrar Nuevo Paquete',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                initialValue: widget.trackingNumber,
+                decoration: const InputDecoration(
+                  labelText: 'Número de Guía',
+                  prefixIcon: Icon(Icons.qr_code),
+                ),
+                enabled: false,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _customerNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del Cliente *',
+                  prefixIcon: Icon(Icons.person),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Ingrese el nombre del cliente';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _customerPhoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Teléfono *',
+                  prefixIcon: Icon(Icons.phone),
+                ),
+                keyboardType: TextInputType.phone,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Ingrese el teléfono';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: selectedLocationId,
+                decoration: const InputDecoration(
+                  labelText: 'Ubicación *',
+                  prefixIcon: Icon(Icons.location_on),
+                ),
+                items: widget.availableLocations.map((location) {
+                  return DropdownMenuItem<String>(
+                    value: location.id.toString(),
+                    child: Text(location.code),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    selectedLocationId = value;
+                  });
+                },
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Seleccione una ubicación';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notas (opcional)',
+                  prefixIcon: Icon(Icons.note),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: widget.onCancel,
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _savePackage,
+                      child: const Text('Guardar'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _savePackage() {
+    if (_formKey.currentState!.validate()) {
+      final package = Package(
+        trackingNumber: widget.trackingNumber,
+        senderName: 'Remitente por definir',
+        senderPhone: '000000000',
+        recipientName: _customerNameController.text,
+        recipientPhone: _customerPhoneController.text,
+        status: 'Pendiente',
+        locationId: selectedLocationId,
+        warehouseId: '1', // Default warehouse
+        registeredDate: DateTime.now(),
+        notified: false,
+        notes: _notesController.text.isEmpty ? null : _notesController.text,
+        originalQRData: widget.originalQRCode, // Guardar el QR original
+      );
+
+      widget.onSave(package);
+    }
+  }
+}
+
+// QR Scanner Overlay (same as before)
+class QrScannerOverlay extends CustomPainter {
+  final Color borderColor;
+  final double borderWidth;
+  final Color overlayColor;
+  final double borderRadius;
+  final double borderLength;
+
+  QrScannerOverlay({
+    this.borderColor = Colors.white,
+    this.borderWidth = 2.0,
+    this.overlayColor = const Color(0x60000000),
+    this.borderRadius = 10.0,
+    this.borderLength = 30.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.width;
+    final height = size.height;
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    final squareSize = width * 0.7;
+    final left = (width - squareSize) / 2;
+    final top = (height - squareSize) / 2;
+    final squareRect = Rect.fromLTWH(left, top, squareSize, squareSize);
+
+    final backgroundPath = Path()..addRect(Rect.fromLTWH(0, 0, width, height));
+
+    final squarePath = Path()
+      ..addRRect(
+          RRect.fromRectAndRadius(squareRect, Radius.circular(borderRadius)));
+
+    final overlayPath = Path.combine(
+      PathOperation.difference,
+      backgroundPath,
+      squarePath,
+    );
+
+    canvas.drawPath(overlayPath, Paint()..color = overlayColor);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(squareRect, Radius.circular(borderRadius)),
+      borderPaint,
+    );
+
+    // Draw corner borders
+    canvas.drawPath(
+      Path()
+        ..moveTo(left, top + borderLength)
+        ..lineTo(left, top)
+        ..lineTo(left + borderLength, top),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(width - left - borderLength, top)
+        ..lineTo(width - left, top)
+        ..lineTo(width - left, top + borderLength),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(left, height - top - borderLength)
+        ..lineTo(left, height - top)
+        ..lineTo(left + borderLength, height - top),
+      borderPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(width - left, height - top - borderLength)
+        ..lineTo(width - left, height - top)
+        ..lineTo(width - left - borderLength, height - top),
+      borderPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}

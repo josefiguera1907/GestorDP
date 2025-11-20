@@ -1,0 +1,361 @@
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+class PackageDetailsScreen extends StatelessWidget {
+  final Map<String, dynamic> package;
+
+  const PackageDetailsScreen({
+    super.key,
+    required this.package,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Detalles del Paquete'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () {
+              // TODO: Implement edit functionality
+            },
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Package ID and Status
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          package['id'] ?? '',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getStatusColor(package['status'])
+                                .withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            package['status'] ?? 'Desconocido',
+                            style: TextStyle(
+                              color: _getStatusColor(package['status']),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      context,
+                      'Cliente',
+                      package['customer'] ?? 'No especificado',
+                      icon: Icons.person_outline,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      context,
+                      'Teléfono',
+                      package['phone'] ?? 'No especificado',
+                      icon: Icons.phone_outlined,
+                      isPhone: true,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      context,
+                      'Ubicación',
+                      package['location'] ?? 'No especificada',
+                      icon: Icons.location_on_outlined,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      context,
+                      'Fecha de registro',
+                      package['date'] ?? 'No especificada',
+                      icon: Icons.calendar_today_outlined,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Actions
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Text(
+                'Acciones',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              childAspectRatio: 2.5,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              children: [
+                _buildActionButton(
+                  context,
+                  'Llamar al Cliente',
+                  Icons.phone,
+                  () => _makePhoneCall(package['phone']),
+                  enabled: package['phone'] != null,
+                ),
+                _buildActionButton(
+                  context,
+                  'Enviar Mensaje',
+                  Icons.message_outlined,
+                  () => _sendMessage(package['phone']),
+                  enabled: package['phone'] != null,
+                ),
+                _buildActionButton(
+                  context,
+                  'Ver Ubicación',
+                  Icons.map_outlined,
+                  () {
+                    // TODO: Show location on map
+                  },
+                ),
+                _buildActionButton(
+                  context,
+                  'Actualizar Estado',
+                  Icons.update,
+                  () {
+                    // TODO: Show status update dialog
+                  },
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            // History/Activity
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Text(
+                'Historial',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    _buildHistoryItem(
+                      'Paquete registrado en el sistema',
+                      '${package['date'] ?? 'Fecha desconocida'} - 10:30 AM',
+                      Icons.inventory_2_outlined,
+                    ),
+                    const Divider(),
+                    _buildHistoryItem(
+                      'Notificación enviada al cliente',
+                      '${package['date'] ?? 'Fecha desconocida'} - 10:35 AM',
+                      package['notified'] == true
+                          ? Icons.check_circle_outline
+                          : Icons.error_outline,
+                      isSuccess: package['notified'] == true,
+                    ),
+                    // Add more history items as needed
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: FilledButton.icon(
+          onPressed: () {
+            // TODO: Mark as delivered or next status
+          },
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text('Marcar como Entregado'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    IconData? icon,
+    bool isPhone = false,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+              ),
+              const SizedBox(height: 2),
+              GestureDetector(
+                onTap: isPhone && value != 'No especificado'
+                    ? () => _makePhoneCall(value)
+                    : null,
+                child: Text(
+                  value,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: isPhone && value != 'No especificado'
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    VoidCallback onPressed, {
+    bool enabled = true,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: enabled ? onPressed : null,
+      icon: Icon(icon),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        side: BorderSide(
+          color: enabled
+              ? Theme.of(context).colorScheme.outline
+              : Colors.grey[300]!,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryItem(String title, String subtitle, IconData icon,
+      {bool isSuccess = true}) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isSuccess
+              ? Colors.green[50]
+              : icon == Icons.error_outline
+                  ? Colors.orange[50]
+                  : Colors.blue[50]!,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: isSuccess
+              ? Colors.green
+              : icon == Icons.error_outline
+                  ? Colors.orange
+                  : icon == Icons.inventory_2_outlined
+                      ? Colors.blue
+                      : Colors.grey[600]!,
+          size: 20,
+        ),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+      ),
+    );
+  }
+
+  Future<void> _makePhoneCall(String? phoneNumber) async {
+    if (phoneNumber == null) return;
+
+    final Uri launchUri = Uri(
+      scheme: 'tel',
+      path: phoneNumber,
+    );
+    if (await canLaunchUrl(launchUri)) {
+      await launchUrl(launchUri);
+    }
+  }
+
+  Future<void> _sendMessage(String? phoneNumber) async {
+    if (phoneNumber == null) return;
+
+    final Uri launchUri = Uri(
+      scheme: 'sms',
+      path: phoneNumber,
+      queryParameters: {
+        'body': 'Hola, este es un mensaje sobre su paquete ${package['id']}.'
+      },
+    );
+
+    if (await canLaunchUrl(launchUri)) {
+      await launchUrl(launchUri);
+    } else if (await canLaunchUrl(Uri.parse('sms:$phoneNumber'))) {
+      await launchUrl(Uri.parse('sms:$phoneNumber'));
+    }
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'en almacén':
+        return Colors.blue;
+      case 'en tránsito':
+        return Colors.orange;
+      case 'en reparto':
+        return Colors.purple;
+      case 'entregado':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+}

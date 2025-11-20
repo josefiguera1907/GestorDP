@@ -1,0 +1,326 @@
+import 'package:flutter/material.dart';
+import 'package:paqueteria_app/presentation/screens/package_details_screen.dart';
+import 'package:paqueteria_app/presentation/screens/scan_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  final List<Map<String, dynamic>> _packages = [
+    {
+      'id': 'GUIA-123456',
+      'customer': 'Juan Pérez',
+      'phone': '+52 55 1234 5678',
+      'status': 'En almacén',
+      'location': 'A1-01',
+      'date': '2023-10-05',
+      'notified': true,
+    },
+    {
+      'id': 'GUIA-789012',
+      'customer': 'María García',
+      'phone': '+52 55 8765 4321',
+      'status': 'En tránsito',
+      'location': 'B2-15',
+      'date': '2023-10-06',
+      'notified': false,
+    },
+    {
+      'id': 'GUIA-345678',
+      'customer': 'Carlos López',
+      'phone': '+52 55 5555 1234',
+      'status': 'En reparto',
+      'location': 'C3-22',
+      'date': '2023-10-07',
+      'notified': true,
+    },
+  ];
+
+  List<Widget> _getWidgetOptions(BuildContext context) {
+    return [
+      _buildPackageList(),
+      const ScanScreen(),
+      _buildLocationsScreen(),
+      _buildMessagesScreen(),
+    ];
+  }
+
+  Widget _buildPackageList() {
+    if (_packages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.inbox_outlined,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No hay paquetes registrados',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _scanQRCode,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Escanear primer paquete'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _packages.length,
+      itemBuilder: (context, index) {
+        final package = _packages[index];
+        return _buildPackageCard(package);
+      },
+    );
+  }
+
+  Widget _buildPackageCard(Map<String, dynamic> package) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PackageDetailsScreen(package: package),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    package['id'] ?? '',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(package['status']).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      package['status'] ?? '',
+                      style: TextStyle(
+                        color: _getStatusColor(package['status']),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                package['customer'] ?? '',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    package['location'] ?? 'Sin ubicación',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const Spacer(),
+                  Icon(
+                    package['notified'] == true
+                        ? Icons.notifications_active
+                        : Icons.notifications_off_outlined,
+                    size: 16,
+                    color: package['notified'] == true
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    package['date'] ?? '',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        // TODO: Show location on map
+                      },
+                      icon: const Icon(Icons.map_outlined, size: 16),
+                      label: const Text('Ubicación'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        // TODO: Send notification
+                      },
+                      icon: const Icon(Icons.message_outlined, size: 16),
+                      label: Text(
+                        package['notified'] == true
+                            ? 'Reenviar'
+                            : 'Notificar',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'en almacén':
+        return Colors.blue;
+      case 'en tránsito':
+        return Colors.orange;
+      case 'en reparto':
+        return Colors.purple;
+      case 'entregado':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _buildLocationsScreen() {
+    return const Center(child: Text('Gestión de Ubicaciones'));
+  }
+
+  Widget _buildMessagesScreen() {
+    return const Center(child: Text('Mensajes a Clientes'));
+  }
+
+  void _onItemTapped(int index) {
+    if (index == 1) {
+      // For the scanner tab, we'll push a new screen instead of just switching
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const ScanScreen()),
+      ).then((_) {
+        // When returning from the scan screen, make sure we're still on the home tab
+        setState(() {
+          _selectedIndex = 0;
+        });
+      });
+    } else {
+      setState(() {
+        _selectedIndex = index;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Sistema de Paquetería'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              // TODO: Implement search functionality
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.notifications_none),
+            onPressed: () {
+              // TODO: Show notifications
+            },
+          ),
+        ],
+      ),
+      body: _getWidgetOptions(context).elementAt(_selectedIndex),
+      floatingActionButton: _selectedIndex == 1
+          ? FloatingActionButton.extended(
+              onPressed: _scanQRCode,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Escanear'),
+            )
+          : null,
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Inicio',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.qr_code_outlined),
+            activeIcon: Icon(Icons.qr_code),
+            label: 'Escanear',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.location_on_outlined),
+            activeIcon: Icon(Icons.location_on),
+            label: 'Ubicaciones',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.message_outlined),
+            activeIcon: Icon(Icons.message),
+            label: 'Mensajes',
+          ),
+        ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Colors.grey,
+        showUnselectedLabels: true,
+        onTap: _onItemTapped,
+      ),
+    );
+  }
+
+  void _scanQRCode() async {
+    // Navigate to the scan screen
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ScanScreen()),
+    );
+    
+    // Handle any result if needed when returning from scan screen
+    if (result != null) {
+      // Refresh the package list or update UI as needed
+      setState(() {
+        _selectedIndex = 0; // Switch to home tab
+      });
+    }
+  }
+
+}

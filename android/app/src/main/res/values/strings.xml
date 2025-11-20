@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GestorDP</string>
+    <string name="default_web_client_id">default_web_client_id</string>
+    <string name="firebase_database_url">https://your-firebase-app.firebaseio.com</string>
+    <string name="google_api_key">your_api_key</string>
+    <string name="google_app_id">your_app_id</string>
+    <string name="google_storage_bucket">your-storage-bucket.appspot.com</string>
+</resources>
