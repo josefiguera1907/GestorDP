@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/gestures.dart';
 import '../providers/package_provider.dart';
 import '../providers/location_provider.dart';
 import '../providers/warehouse_provider.dart';
@@ -336,6 +337,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                       child: ListView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: filteredPackages.length,
+                        physics: const ClampingScrollPhysics(), // Mejora percepción táctil
                         itemBuilder: (context, index) {
                           final package = filteredPackages[index];
                           return _buildPackageCard(context, package);

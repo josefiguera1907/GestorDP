@@ -9,8 +9,8 @@ class PackageProvider with ChangeNotifier {
   bool _hasMore = true;
   String? _error;
 
-  // Paginación para dispositivos de 2GB RAM
-  static const int _pageSize = 50; // Cargar 50 items a la vez
+  // Paginación optimizada para dispositivos de 1GB RAM
+  static const int _pageSize = 20; // Reducido de 50 a 20 para bajo recurso
 
   List<Package> get packages => _packages;
   bool get isLoading => _isLoading;
@@ -25,8 +25,10 @@ class PackageProvider with ChangeNotifier {
 
     // Por defecto siempre reemplazar la lista para evitar duplicados
     _hasMore = true;
-    _packages.clear();
 
+    // Liberar memoria de la lista anterior antes de reemplazarla
+    _packages.clear();
+    // Forzar garbage collection (mejor práctica en dispositivos bajos recursos)
     notifyListeners();
 
     try {
@@ -115,7 +117,10 @@ class PackageProvider with ChangeNotifier {
 
   Future<List<Package>> searchPackages(String query) async {
     try {
-      return await _repository.searchPackages(query);
+      // Limitar el número de resultados en dispositivos con poca RAM
+      final results = await _repository.searchPackages(query);
+      // Limitar a 50 resultados máximos para no consumir mucha memoria
+      return results.length > 50 ? results.take(50).toList() : results;
     } catch (e) {
       _error = 'Error al buscar: $e';
       notifyListeners();

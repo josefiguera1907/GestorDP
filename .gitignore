@@ -1,45 +1,94 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+# Dependencies
+/packages/
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
+# Generated plugin build files
+.androidlocal.properties
+.ioslocal.properties
+.flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
+.local_properties
+
+# Coverage
 /coverage/
 
-# Symbolication related
-app.*.symbols
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+.wt
+.tern-project
+.tern-port
+.nyc_output
+.sourcemaps
 
-# Obfuscation related
-app.*.map.json
+# Build
+/build/
+/bin/cache/
+/bin/internal/engine.version
+/bin/mingit.properties
+/dev/tools/vitool
+/examples/flutter_gallery/.ios/
+/examples/flutter_gallery/.plugin_symlinks/
+/examples/flutter_gallery/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+/examples/flutter_gallery/ios/.symlinks/
+/examples/flutter_gallery/macos/.symlinks/
+/examples/flutter_gallery/web/
+/packages/flutter_tools/test/callback_tracking_vm.dart
+/packages/flutter_tools/test/mocks_for_test.dart
+/packages/flutter_tools/test/runners/mock_otd_server.dart
+/packages/flutter_tools/test/src/mocking.dart
+/bin/
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Android
+/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+/android/local.properties
+/android/.gradle
+/android/capturs
+/android/gradlew
+/android/gradlew.bat
+/android/*.iml
+/android/key.properties
+/android/**/signing_config.txt
+
+# iOS
+/ios/Flutter/App.framework
+/ios/Flutter/Flutter.framework
+/ios/Flutter/Flutter.podspec
+/ios/Flutter/app.flx
+/ios/Flutter/app.zip
+/ios/Flutter/flutter_assets/
+/ios/Flutter/flutter_assets/.DS_Store
+/ios/Runner.xcworkspace/
+/ios/Runner.xcodeproj/
+/ios/Runner.xcodeproj/**/*.pbxuser
+/ios/Runner.xcodeproj/**/*.perspectivev3
+/ios/Runner.xcodeproj/**/*.mode1v3
+/ios/Runner.xcodeproj/**/*.mode2v3
+/ios/Runner.xcodeproj/**/*.xcuserdatad
+/ios/Runner.xcodeproj/**/*.xcuserdata
+/ios/Runner.xcodeproj/**/*.moved-aside
+/ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+/ios/Runner.xcworkspace/contents.xcworkspacedata
+/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+/ios/Flutter/.last_build_id
+/ios/Runner.build/
+/ios/Pods/
+/ios/ios/.symlinks/
+/ios/.symlinks/
+/ios/Podfile.lock
+/ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme
+/ios/Flutter/ephemeral/
+/ios/Flutter/ephemeral/.symlinks/
+
+# Web
+/web/**
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+**/Thumbs.db
+ehthumbs.db

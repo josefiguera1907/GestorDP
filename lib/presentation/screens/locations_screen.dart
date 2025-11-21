@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/gestures.dart';
 import '../../domain/entities/location.dart';
 import '../providers/location_provider.dart';
 import '../providers/warehouse_provider.dart';
@@ -35,6 +36,15 @@ class _LocationsScreenState extends State<LocationsScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    // Forzar la recarga de ubicaciones para asegurar que se actualicen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<LocationProvider>().loadLocations();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
     final canManage = authProvider.currentUser?.canManageLocations ?? true;
@@ -47,7 +57,13 @@ class _LocationsScreenState extends State<LocationsScreen> {
             warehouseProvider.warehouses.isNotEmpty) {
           final filteredWarehouse = warehouseProvider.warehouses.firstWhere(
             (w) => w.id == widget.filterWarehouseId,
-            orElse: () => warehouseProvider.warehouses.first,
+            orElse: () {
+              // Si no se encuentra el almacén, forzamos la recarga de datos
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                warehouseProvider.loadWarehouses();
+              });
+              return warehouseProvider.warehouses.first;
+            },
           );
 
           // Seleccionar el almacén filtrado solo una vez
@@ -57,7 +73,19 @@ class _LocationsScreenState extends State<LocationsScreen> {
               setState(() {
                 _filterApplied = true;
               });
+            } else {
+              // Si el almacén ya está seleccionado pero no se ha aplicado el filtro, forzamos la actualización
+              setState(() {
+                _filterApplied = true;
+              });
             }
+          });
+        } else if (widget.filterWarehouseId != null &&
+                   warehouseProvider.selectedWarehouse?.id == widget.filterWarehouseId &&
+                   !_filterApplied) {
+          // Si el almacén ya estaba seleccionado pero el filtro no se aplicó, lo aplicamos
+          setState(() {
+            _filterApplied = true;
           });
         }
 
@@ -180,6 +208,8 @@ class _LocationsScreenState extends State<LocationsScreen> {
                             final selected = warehouseProvider.warehouses
                                 .firstWhere((w) => w.id == value);
                             warehouseProvider.selectWarehouse(selected);
+                            // Forzar actualización de la interfaz para reflejar que hay un almacén seleccionado
+                            setState(() {});
                           }
                         },
                       ),
@@ -212,7 +242,72 @@ class _LocationsScreenState extends State<LocationsScreen> {
     bool canManage,
   ) {
     if (warehouseProvider.selectedWarehouse == null) {
-      return const Center(child: Text('Seleccione un almacén'));
+      if (warehouseProvider.warehouses.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.warehouse_outlined, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+              Text(
+                'No hay almacenes disponibles',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+              ),
+              const SizedBox(height: 16),
+              if (canManage)
+                FilledButton.icon(
+                  onPressed: () {
+                    // Navegar a la pantalla de almacenes para crear uno
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Debes crear un almacén antes de crear ubicaciones'),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.warehouse),
+                  label: const Text('Crear Almacén'),
+                ),
+            ],
+          ),
+        );
+      } else {
+        // Si hay almacenes pero ninguno está seleccionado, mostrar mensaje
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.warehouse_outlined, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+              Text(
+                'Selecciona un almacén',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButton<String>(
+                hint: const Text('Selecciona un almacén'),
+                value: null,
+                items: warehouseProvider.warehouses.map((warehouse) {
+                  return DropdownMenuItem<String>(
+                    value: warehouse.id,
+                    child: Text(warehouse.name),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    final selected = warehouseProvider.warehouses
+                        .firstWhere((w) => w.id == value);
+                    warehouseProvider.selectWarehouse(selected);
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      }
     }
 
     if (locationProvider.isLoading) {
@@ -255,7 +350,9 @@ class _LocationsScreenState extends State<LocationsScreen> {
                   ),
             ),
             const SizedBox(height: 16),
-            if (canManage && warehouseProvider.selectedWarehouse?.id != null)
+            if (canManage &&
+                warehouseProvider.selectedWarehouse != null &&
+                warehouseProvider.selectedWarehouse!.id != null)
               FilledButton.icon(
                 onPressed: () {
                   final warehouseId = warehouseProvider.selectedWarehouse!.id;
@@ -302,7 +399,8 @@ class _LocationsScreenState extends State<LocationsScreen> {
                     ),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      onPressed: warehouseProvider.selectedWarehouse?.id != null
+                      onPressed: warehouseProvider.selectedWarehouse != null &&
+                                warehouseProvider.selectedWarehouse!.id != null
                           ? () {
                               _showLocationDialog(context, warehouseProvider.selectedWarehouse!.id!);
                             }
@@ -321,6 +419,7 @@ class _LocationsScreenState extends State<LocationsScreen> {
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               itemCount: warehouseLocations.length,
+              physics: const ClampingScrollPhysics(), // Mejora percepción táctil
               itemBuilder: (context, index) {
                 final location = warehouseLocations[index];
                 final packagesInLocation = packageProvider.packages

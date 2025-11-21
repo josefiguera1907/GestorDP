@@ -37,13 +37,20 @@ class DatabaseHelper {
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
         onOpen: (db) async {
-          // Solo lo esencial - usar rawQuery para PRAGMA
+          // Configuraciones optimizadas para dispositivos de baja RAM
           try {
+            // Modo WAL para mejor rendimiento
             await db.rawQuery('PRAGMA journal_mode = WAL');
             print('✅ WAL mode habilitado');
+
+            // Ajustes para bajo uso de memoria RAM
+            await db.rawQuery('PRAGMA cache_size = 1000'); // Reducido de default 2000
+            await db.rawQuery('PRAGMA temp_store = MEMORY'); // Almacenamiento temporal en RAM
+            await db.rawQuery('PRAGMA mmap_size = 268435456'); // 256MB, adecuado para bajo recurso
+            print('⚙️ Configuraciones de bajo consumo aplicadas');
           } catch (e) {
-            print('⚠️ No se pudo configurar WAL mode: $e');
-            // Continuar sin WAL mode
+            print('⚠️ No se pudieron configurar optimizaciones: $e');
+            // Continuar con valores por defecto
           }
         },
       );

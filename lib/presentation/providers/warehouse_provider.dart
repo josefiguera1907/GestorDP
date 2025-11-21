@@ -22,9 +22,16 @@ class WarehouseProvider with ChangeNotifier {
 
     try {
       _warehouses = await _repository.getAllWarehouses();
-      // Set first warehouse as selected if none selected
-      if (_selectedWarehouse == null && _warehouses.isNotEmpty) {
-        _selectedWarehouse = _warehouses.first;
+      // No seleccionar automáticamente un almacén; esperar a que el usuario lo seleccione explícitamente
+      // Solo mantener seleccionado si ya había uno seleccionado previamente
+      if (_warehouses.isNotEmpty && _selectedWarehouse != null) {
+        // Verificar que el almacén seleccionado aún exista
+        final exists = _warehouses.any((w) => w.id == _selectedWarehouse!.id);
+        if (!exists) {
+          _selectedWarehouse = null;
+        }
+      } else if (_warehouses.isEmpty) {
+        _selectedWarehouse = null;
       }
     } catch (e) {
       _error = 'Error al cargar almacenes: $e';
@@ -42,13 +49,8 @@ class WarehouseProvider with ChangeNotifier {
   Future<void> addWarehouse(Warehouse warehouse) async {
     try {
       await _repository.insertWarehouse(warehouse);
-      // Optimización: agregar localmente sin recargar toda la lista
-      _warehouses.add(warehouse);
-      // Set as selected if none selected
-      if (_selectedWarehouse == null) {
-        _selectedWarehouse = warehouse;
-      }
-      notifyListeners();
+      // Reload all warehouses to ensure consistency with database
+      await loadWarehouses();
     } catch (e) {
       _error = 'Error al agregar almacén: $e';
       notifyListeners();
@@ -59,16 +61,8 @@ class WarehouseProvider with ChangeNotifier {
   Future<void> updateWarehouse(Warehouse warehouse) async {
     try {
       await _repository.updateWarehouse(warehouse);
-      // Optimización: actualizar localmente sin recargar toda la lista
-      final index = _warehouses.indexWhere((w) => w.id == warehouse.id);
-      if (index != -1) {
-        _warehouses[index] = warehouse;
-        // Update selected warehouse if it's the one being updated
-        if (_selectedWarehouse?.id == warehouse.id) {
-          _selectedWarehouse = warehouse;
-        }
-        notifyListeners();
-      }
+      // Reload all warehouses to ensure consistency with database
+      await loadWarehouses();
     } catch (e) {
       _error = 'Error al actualizar almacén: $e';
       notifyListeners();
@@ -79,17 +73,8 @@ class WarehouseProvider with ChangeNotifier {
   Future<void> deleteWarehouse(String id) async {
     try {
       await _repository.deleteWarehouse(id);
-      // Clear selected warehouse if it's the one being deleted
-      if (_selectedWarehouse?.id == id) {
-        _selectedWarehouse = null;
-      }
-      // Optimización: eliminar localmente sin recargar toda la lista
-      _warehouses.removeWhere((w) => w.id == id);
-      // Set first warehouse as selected if none selected and list not empty
-      if (_selectedWarehouse == null && _warehouses.isNotEmpty) {
-        _selectedWarehouse = _warehouses.first;
-      }
-      notifyListeners();
+      // Reload all warehouses to ensure consistency with database
+      await loadWarehouses();
     } catch (e) {
       _error = 'Error al eliminar almacén: $e';
       notifyListeners();

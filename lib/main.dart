@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/gestures.dart';
 
 import 'presentation/screens/home_screen.dart';
 import 'presentation/screens/login_screen.dart';
@@ -14,14 +15,17 @@ import 'data/datasources/database_helper.dart';
 import 'data/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/memory_manager.dart';
+import 'core/utils/performance_config.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // NO inicializar BD aquí, se hace lazy en el primer uso
-  // Iniciar gestor de memoria para dispositivos de 2GB RAM
+  // Aplicar optimizaciones de rendimiento para dispositivos bajos recursos
+  PerformanceConfig.applyOptimizations();
+
+  // Iniciar gestor de memoria optimizado para 1GB RAM
   MemoryManager().startMonitoring();
 
   runApp(
@@ -38,9 +42,11 @@ void main() {
     ),
   );
 
-  // Crear índices en background después de 5 segundos
-  Future.delayed(const Duration(seconds: 5), () async {
+  // Crear índices en background después de 15 segundos (para no sobrecargar inicio)
+  // Ajustado para dispositivos con recursos limitados
+  Future.delayed(const Duration(seconds: 15), () async {
     await DatabaseHelper().database; // Inicializar si no está
+    // Crear índices de forma más eficiente en dispositivos bajos recursos
     await DatabaseHelper().createRemainingIndexes();
   });
 }
@@ -127,32 +133,43 @@ class _MyAppState extends State<MyApp> {
           darkTheme: AppTheme.darkTheme,
           themeMode: themeProvider.themeMode,
           home: _buildHome(authProvider),
-      builder: (context, child) {
-        // Optimización para TC26 y dispositivos móviles pequeños
-        final mediaQueryData = MediaQuery.of(context);
-        final screenWidth = mediaQueryData.size.width;
+          builder: (context, child) {
+            // Optimización para TC26 y dispositivos móviles pequeños
+            final mediaQueryData = MediaQuery.of(context);
+            final screenWidth = mediaQueryData.size.width;
 
-        // Ajustar escala de texto basado en el tamaño de pantalla
-        double scaleFactor = 1.0;
-        if (screenWidth < 360) {
-          // Pantallas muy pequeñas (TC26)
-          scaleFactor = 0.9;
-        } else if (screenWidth < 600) {
-          // Pantallas pequeñas normales
-          scaleFactor = 1.0;
-        } else {
-          // Tablets y más grandes
-          scaleFactor = 1.0;
-        }
+            // Ajustar escala de texto basado en el tamaño de pantalla
+            double scaleFactor = 1.0;
+            if (screenWidth < 360) {
+              // Pantallas muy pequeñas (TC26) - reducir el escalado
+              scaleFactor = 0.85;
+            } else if (screenWidth < 600) {
+              // Pantallas pequeñas normales
+              scaleFactor = 0.95;
+            } else {
+              // Tablets y más grandes
+              scaleFactor = 1.0;
+            }
 
-        return MediaQuery(
-          data: mediaQueryData.copyWith(
-            // Usar solo textScaler (nuevo API de Flutter)
-            textScaler: TextScaler.linear(scaleFactor.clamp(0.8, 1.3)),
+            return MediaQuery(
+              data: mediaQueryData.copyWith(
+                // Usar solo textScaler (nuevo API de Flutter)
+                textScaler: TextScaler.linear(scaleFactor.clamp(0.8, 1.3)),
+              ),
+              child: ScrollConfiguration(
+                // Optimización para mejor desempeño en scroll
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: { PointerDeviceKind.touch, PointerDeviceKind.mouse },
+                ),
+                child: child!,
+              ),
+            );
+          },
+          scrollBehavior: const MaterialScrollBehavior().copyWith(
+            // Deshabilitar el efecto de overscroll para mejor rendimiento
+            overscroll: false,
+            dragDevices: { PointerDeviceKind.touch, PointerDeviceKind.mouse },
           ),
-          child: child!,
-        );
-      },
         );
       },
     );

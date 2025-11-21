@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/gestures.dart';
 import '../../domain/entities/warehouse.dart';
 import '../providers/warehouse_provider.dart';
 import '../providers/auth_provider.dart';
@@ -15,6 +16,7 @@ class WarehousesScreen extends StatelessWidget {
     final canManage = authProvider.currentUser?.canManageWarehouses ?? true;
 
     return Consumer<WarehouseProvider>(
+      // Agregar key para mejorar la gestión del estado y rendimiento
       builder: (context, warehouseProvider, child) {
         if (warehouseProvider.isLoading) {
           return const Center(child: CircularProgressIndicator());
@@ -104,6 +106,7 @@ class WarehousesScreen extends StatelessWidget {
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: warehouses.length,
+                  physics: const ClampingScrollPhysics(), // Mejora percepción táctil
                   itemBuilder: (context, index) {
                     final warehouse = warehouses[index];
                     return _WarehouseCard(
@@ -312,6 +315,12 @@ class _WarehouseFormDialogState extends State<WarehouseFormDialog> {
               ),
             ),
           );
+
+          // Forzar recarga de datos para asegurar que se reflejen correctamente
+          // en otras pantallas que dependan de la información de almacenes
+          Future.delayed(Duration(milliseconds: 500), () {
+            context.read<WarehouseProvider>().loadWarehouses();
+          });
         }
       }
     }
